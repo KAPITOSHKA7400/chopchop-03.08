@@ -23,7 +23,6 @@ class TgChatUser extends Model
     public function messages()
     {
         return $this->hasMany(ChatMessage::class, 'telegram_user_id', 'user_id')
-        ->orderBy('created_at', 'desc'); // добавь эту строку!
+            ->orderBy('created_at', 'desc');
     }
-
 }

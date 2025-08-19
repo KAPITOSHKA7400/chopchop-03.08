@@ -76,7 +76,7 @@
 
                         <div class="flex flex-wrap gap-2 mt-4 md:mt-0 md:ml-6">
                             @if($isOwner)
-                                <a href="#" class="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">Наборы сообщений</a>
+                                <a href="{{ route('msg-sets.index', $bot->id) }}" class="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">Наборы сообщений</a>
                                 <a href="#" class="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">Редактировать</a>
                                 <a href="#" class="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">Статистика</a>
                                 <button type="button" onclick="generateAndCopyInvite({{ $bot->id }}, this)"

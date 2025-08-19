@@ -10,6 +10,8 @@ export default {
         './vendor/laravel/jetstream/**/*.blade.php',
         './storage/framework/views/*.php',
         './resources/views/**/*.blade.php',
+        './resources/js/**/*.vue',        // <-- Добавь эту строку!
+        './resources/js/**/*.js',         // <-- И эту строку!
     ],
 
     theme: {

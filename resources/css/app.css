@@ -5,3 +5,31 @@
 [x-cloak] {
     display: none;
 }
+
+:root {
+    --scrollbar-thumb: #e5e7eb;    /* Светлый: gray-200 */
+    --scrollbar-track: #f3f4f6;    /* Светлый: gray-100 */
+}
+
+.dark {
+    --scrollbar-thumb: #374151;    /* Тёмный: gray-700 */
+    --scrollbar-track: #1a1d26;    /* Тёмный: очень тёмный */
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    background: var(--scrollbar-track);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 8px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #6b7280; /* hover-эффект, серый-500 */
+}
+
+/* Firefox */
+.custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}

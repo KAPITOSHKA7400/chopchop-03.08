@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Models\ChatMessageFile;
 
 class ChatMessage extends Model
 {
@@ -24,5 +25,10 @@ class ChatMessage extends Model
     public function user()
     {
         return $this->belongsTo(TgChatUser::class, 'telegram_user_id', 'user_id');
+    }
+
+    public function files()
+    {
+        return $this->hasMany(\App\Models\ChatMessageFile::class, 'chat_message_id');
     }
 }

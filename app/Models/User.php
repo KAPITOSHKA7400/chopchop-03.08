@@ -70,4 +70,10 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(\App\Models\Bot::class, 'bot_user', 'user_id', 'bot_id');
     }
+
+    public function messages()
+    {
+        return $this->hasMany(ChatMessage::class, 'telegram_user_id', 'telegram_user_id');
+        // Или 'user_id', если твоя связь так называется
+    }
 }
