@@ -16,6 +16,7 @@ class ChatMessageFile extends Model
         'file_path',
         'mime_type',
         'size',
+        'tg_message_id',
     ];
 
     // добавляем в JSON

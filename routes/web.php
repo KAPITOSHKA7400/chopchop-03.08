@@ -68,7 +68,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/faq', function () { return view('faq'); });
 
     // API для Vue, но через сессию:
-    Route::post('/chats/{userId}/messages', [ChatController::class, 'sendMessage'])->name('chats.send');
+//    Route::post('/chats/{userId}/messages', [ChatController::class, 'sendMessage'])->name('chats.send');
 });
 
 // Приглашения к боту (оставляй как есть)

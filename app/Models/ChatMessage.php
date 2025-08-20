@@ -16,10 +16,21 @@ class ChatMessage extends Model
         'telegram_user_id',
         'username',
         'text',
-        'is_read',       // ← здесь
+        'is_read',
         'is_operator',
+        'tg_message_id',
+        'is_deleted',
+        'is_edited',
         'created_at',
         'updated_at',
+    ];
+
+    protected $casts = [
+        'is_operator' => 'boolean',
+        'is_auto'     => 'boolean',
+        'is_read'     => 'boolean',
+        'is_deleted'  => 'boolean', // <—
+        'is_edited'   => 'boolean', // <—
     ];
 
     public function user()

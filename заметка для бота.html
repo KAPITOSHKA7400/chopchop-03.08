@@ -3,8 +3,11 @@
 <head>
 
     cd H:\Programs\OSPanel\home\chopchop.local\bots
-    set "DB_DSN=root:@tcp(127.127.126.31:3306)/chopchop_db?charset=utf8mb4&parseTime=true"
+    set "DB_DSN=root:@tcp(127.127.126.31:3306)/chopchop_db?parseTime=true&charset=utf8mb4,utf8"
+    echo %DB_DSN%
     go run main.go
+
+
 
     ```
 

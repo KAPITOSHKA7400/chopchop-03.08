@@ -2,8 +2,13 @@ package main
 
 import (
     "database/sql"
+    "fmt"
+    "io"
     "log"
+    "mime"
+    "net/http"
     "os"
+    "path/filepath"
     "strings"
     "time"
 
@@ -136,26 +141,111 @@ func runBot(botToken, dsn string) {
         // 2) Обычные сообщения от пользователя
         user := update.Message.From
         chatID := update.Message.Chat.ID
+
+        // текст может быть в Caption у фото/видео
         text := update.Message.Text
+        if text == "" && update.Message.Caption != "" {
+            text = update.Message.Caption
+        }
 
         // Upsert пользователя
         avatarURL := fetchAvatarURL(bot, user.ID)
         saveChatUserToDB(db, botID, user, avatarURL)
 
-        // Сохраняем текст в chat_message
-        if _, err := db.Exec(
+        // 2.1) Сохраняем запись в chat_message и получаем её id
+        res, err := db.Exec(
             `INSERT INTO chat_message
-               (bot_token, chat_id, telegram_user_id, username, text, created_at)
-             VALUES(?, ?, ?, ?, ?, NOW())`,
+               (bot_token, chat_id, telegram_user_id, username, text, created_at, updated_at)
+             VALUES(?, ?, ?, ?, ?, NOW(), NOW())`,
             botToken,
             chatID,
             user.ID,
             user.UserName,
             text,
-        ); err != nil {
+        )
+        if err != nil {
             log.Println("Ошибка вставки сообщения:", err)
-        } else {
-            log.Printf("chat_message saved: chat=%d user=%d text=%q\n", chatID, user.ID, text)
+            continue
+        }
+        messageID, _ := res.LastInsertId()
+        log.Printf("chat_message saved: id=%d chat=%d user=%d\n", messageID, chatID, user.ID)
+
+        // 2.2) Обрабатываем вложения и пишем в chat_message_files
+
+        // PHOTO: у твоей версии tgbotapi это *([]PhotoSize), поэтому разыменовываем
+        if update.Message.Photo != nil && len(*update.Message.Photo) > 0 {
+            ph := *update.Message.Photo
+            p := ph[len(ph)-1] // самый большой
+            rel, mimeType, size, err := downloadTelegramFile(bot, p.FileID, fmt.Sprintf("photo_%d.jpg", time.Now().UnixNano()))
+            if err == nil {
+                insertMessageFile(db, messageID, "photo.jpg", rel, mimeType, size)
+            } else {
+                log.Println("photo download error:", err)
+            }
+        }
+
+        // DOCUMENT (в т.ч. gif приходит как document)
+        if doc := update.Message.Document; doc != nil {
+            rel, mimeType, size, err := downloadTelegramFile(bot, doc.FileID, safeFileName(doc.FileName, "document"))
+            if err == nil {
+                insertMessageFile(db, messageID, emptyIfTooLong(doc.FileName, "document"), rel, mimeType, size)
+            } else {
+                log.Println("document download error:", err)
+            }
+        }
+
+        // ANIMATION (gif/mp4)
+        if anim := update.Message.Animation; anim != nil {
+            rel, mimeType, size, err := downloadTelegramFile(bot, anim.FileID, fmt.Sprintf("animation_%d.mp4", time.Now().UnixNano()))
+            if err == nil {
+                insertMessageFile(db, messageID, "animation.mp4", rel, mimeType, size)
+            } else {
+                log.Println("animation download error:", err)
+            }
+        }
+
+        // VIDEO
+        if v := update.Message.Video; v != nil {
+            rel, mimeType, size, err := downloadTelegramFile(bot, v.FileID, fmt.Sprintf("video_%d.mp4", time.Now().UnixNano()))
+            if err == nil {
+                insertMessageFile(db, messageID, "video.mp4", rel, mimeType, size)
+            } else {
+                log.Println("video download error:", err)
+            }
+        }
+
+        // AUDIO — у старых версий нет FileName, берём Title (или дефолт)
+        if a := update.Message.Audio; a != nil {
+            base := a.Title
+            if base == "" {
+                base = "audio"
+            }
+            rel, mimeType, size, err := downloadTelegramFile(bot, a.FileID, safeFileName(base, "audio"))
+            if err == nil {
+                insertMessageFile(db, messageID, emptyIfTooLong(base, "audio"), rel, mimeType, size)
+            } else {
+                log.Println("audio download error:", err)
+            }
+        }
+
+        // VOICE (обычно .ogg/opus)
+        if v := update.Message.Voice; v != nil {
+            rel, mimeType, size, err := downloadTelegramFile(bot, v.FileID, fmt.Sprintf("voice_%d.ogg", time.Now().UnixNano()))
+            if err == nil {
+                insertMessageFile(db, messageID, "voice.ogg", rel, mimeType, size)
+            } else {
+                log.Println("voice download error:", err)
+            }
+        }
+
+        // STICKER
+        if st := update.Message.Sticker; st != nil {
+            rel, mimeType, size, err := downloadTelegramFile(bot, st.FileID, "sticker")
+            if err == nil {
+                insertMessageFile(db, messageID, "sticker", rel, mimeType, size)
+            } else {
+                log.Println("sticker download error:", err)
+            }
         }
     }
 }
@@ -273,5 +363,118 @@ func saveChatUserToDB(db *sql.DB, botID int64, user *tgbotapi.User, avatarURL st
         avatarURL,
     ); err != nil {
         log.Println("saveChatUserToDB error:", err)
+    }
+}
+
+// ======== ВАЖНОЕ: куда сохраняем файлы ========
+
+// publicStorageRoot возвращает абсолютный путь к Laravel storage/app/public.
+// Сначала берём из переменной окружения PUBLIC_STORAGE_ABS (если задана),
+// иначе вычисляем относительно расположения исполняемого файла (../storage/app/public).
+func publicStorageRoot() string {
+    if v := os.Getenv("PUBLIC_STORAGE_ABS"); v != "" {
+        return v
+    }
+    exe, err := os.Executable()
+    if err != nil {
+        // запасной вариант: текущая рабочая директория
+        wd, _ := os.Getwd()
+        return filepath.Join(wd, "..", "storage", "app", "public")
+    }
+    // если бот находится в ...\chopchop.local\bots\bot.exe
+    // то нужно подняться на уровень выше (..\) -> storage\app\public
+    base := filepath.Dir(exe)
+    return filepath.Join(base, "..", "storage", "app", "public")
+}
+
+// safeFileName подрежет слишком длинные имена и подставит дефолт при пустом
+func safeFileName(name, def string) string {
+    if name == "" {
+        return def
+    }
+    if len(name) > 120 {
+        return name[len(name)-120:]
+    }
+    return name
+}
+
+// emptyIfTooLong — если имя пустое, подставит def; если слишком длинное — обрежет
+func emptyIfTooLong(name, def string) string {
+    if name == "" {
+        return def
+    }
+    if len(name) > 255 {
+        return name[len(name)-255:]
+    }
+    return name
+}
+
+// downloadTelegramFile качает файл по fileID в public storage и возвращает относительный путь, mime и размер.
+// ВНИМАНИЕ: сохраняем в storage/app/public/telegram/YYYY/MM/... проекта (не в bots/).
+func downloadTelegramFile(bot *tgbotapi.BotAPI, fileID, suggestedName string) (string, string, int64, error) {
+    file, err := bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
+    if err != nil {
+        return "", "", 0, err
+    }
+
+    url := file.Link(bot.Token)
+
+    now := time.Now()
+    baseDir := filepath.Join(publicStorageRoot(), "telegram", now.Format("2006"), now.Format("01"))
+    if err := os.MkdirAll(baseDir, 0o755); err != nil {
+        return "", "", 0, err
+    }
+
+    // Имя: если у suggestedName нет расширения, добавим из file_path
+    ext := filepath.Ext(file.FilePath)
+    name := safeFileName(suggestedName, "file")
+    if filepath.Ext(name) == "" && ext != "" {
+        name += ext
+    }
+
+    dstPath := filepath.Join(baseDir, name)
+    out, err := os.Create(dstPath)
+    if err != nil {
+        return "", "", 0, err
+    }
+    defer out.Close()
+
+    resp, err := http.Get(url)
+    if err != nil {
+        return "", "", 0, err
+    }
+    defer resp.Body.Close()
+
+    n, err := io.Copy(out, resp.Body)
+    if err != nil {
+        return "", "", 0, err
+    }
+
+    // MIME
+    mtype := resp.Header.Get("Content-Type")
+    if mtype == "" {
+        m := mime.TypeByExtension(filepath.Ext(dstPath))
+        if m == "" {
+            m = "application/octet-stream"
+        }
+        mtype = m
+    }
+
+    // относительный путь для БД (Laravel: Storage::url("telegram/...") → /storage/telegram/...)
+    rel := filepath.ToSlash(filepath.Join("telegram", now.Format("2006"), now.Format("01"), name))
+
+    return rel, mtype, n, nil
+}
+
+// insertMessageFile создаёт строку в chat_message_files
+func insertMessageFile(db *sql.DB, messageID int64, fileName, relPath, mimeType string, size int64) {
+    _, err := db.Exec(
+        `INSERT INTO chat_message_files
+           (chat_message_id, file_name, file_path, mime_type, size, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
+        messageID, fileName, relPath, mimeType, size,
+    )
+    if err != nil {
+        log.Println("insertMessageFile error:", err)
     }
 }
